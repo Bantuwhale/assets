@@ -1,0 +1,39 @@
+name: Purge jsDelivr cache
+
+# When assets change on main, tell jsDelivr to drop its cached copies so the
+# new bytes go live immediately (instead of waiting out the ~12h branch cache).
+# Purge is a public, unauthenticated API — no secrets needed.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # allow manual "purge everything" runs from the Actions tab
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # need the previous commit to diff against
+
+      - name: Purge changed files (or all on manual run)
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FILES=$(git ls-files)
+          elif git rev-parse "${{ github.event.before }}^{commit}" >/dev/null 2>&1; then
+            FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          else
+            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git ls-files)
+          fi
+
+          if [ -z "$FILES" ]; then echo "No files to purge."; exit 0; fi
+
+          echo "Purging on jsDelivr:"; echo "$FILES"
+          for f in $FILES; do
+            [ -f "$f" ] || continue   # skip deletions
+            url="https://purge.jsdelivr.net/gh/${{ github.repository }}@main/$f"
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || echo "ERR")
+            echo "  [$code] $url"
+          done
